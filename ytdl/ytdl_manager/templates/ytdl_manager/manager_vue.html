@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- Load required Bootstrap and BootstrapVue CSS -->
+    <link type="text/css" rel="stylesheet" href="https://unpkg.com/bootstrap/dist/css/bootstrap.min.css" />
+    <link type="text/css" rel="stylesheet" href="https://unpkg.com/bootstrap-vue@latest/dist/bootstrap-vue.min.css" />
+
+    <!-- Load polyfills to support older browsers -->
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es2015%2CIntersectionObserver"
+        crossorigin="anonymous"></script>
+
+    <!-- Load Vue followed by BootstrapVue -->
+    <script src="https://unpkg.com/vue@2.6.14/dist/vue.js"></script>
+    <script src="https://unpkg.com/bootstrap-vue@latest/dist/bootstrap-vue.min.js"></script>
+
+    <!-- Load the following for BootstrapVueIcons support -->
+    <script src="https://unpkg.com/bootstrap-vue@latest/dist/bootstrap-vue-icons.min.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/js-cookie@3.0.1/dist/js.cookie.min.js"></script>
+
+    <title>Youtube Download Manager</title>
+
+    <style>
+        tr {
+            vertical-align: middle;
+        }
+    </style>
+
+</head>
+
+<body>
+
+    {% verbatim %}
+    <div id="app">
+        <div class="container">
+            <h2>Youtube Download manager</h2>
+
+            <b-button v-b-modal="'addVideoModal'">Add video</b-button>
+
+            <!-- add video modal -->
+            <b-modal id="addVideoModal" title="Add New Video" ok-only ok-title="Add" @ok="onAddVideoClick">
+
+                <b-form method="post" @submit.prevent="videoSubmit">
+                    <b-form-group label="Video Url:" label-for="video-url-input">
+                        <b-form-input id="video-url-input" v-model="videoUrl" type="text" required autocomplete="off">
+                        </b-form-input>
+                    </b-form-group>
+                </b-form>
+
+            </b-modal>
+
+            <!-- videos table -->
+            <b-table :fields="vTableFields" :items="videos">
+                <template #cell(dn_status)="data">
+                    {{ statusText(data.value) }}
+                </template>
+                <template #cell(progress)="{item}">
+                    <b-progress v-if="item.dn_status ===1" precision="2" show-progress
+                        :value="item.result.downloaded_bytes" :max="item.result.total_bytes" show-progress animated>
+                    </b-progress>
+                </template>
+                <template #cell(actions)="{item}">
+                    <b-button v-if="canDownload(item)" @click="startDownload(item.video_id)">Start</b-button>
+                    <b-button v-if="canStopDownload(item)" @click="stopDownload(item.video_id)">Stop</b-button>
+                </template>
+            </b-table>
+        </div>
+    </div>
+    {% endverbatim %}
+
+    <script>
+        var app = new Vue({
+            el: '#app',
+            data: {
+                videoUrl: "",
+                videos: [],
+                pollItervalId: null,
+                vTableFields: [
+                    {
+                        key: "video_id",
+                        label: "Video Id",
+                    },
+                    {
+                        key: "dn_status",
+                        label: "Status"
+                    },
+                    {
+                        key: "progress",
+                        label: "Progress"
+                    },
+                    {
+                        key: "actions",
+                        label: ""
+                    }
+
+                ]
+            },
+            created() {
+                this.getVideos()
+            },
+            mounted() {
+                this.startPollVideoStatus()
+            },
+            computed: {
+                pollVideos() {
+                    return this.videos.filter(v => v.dn_status === 1)
+                }
+            },
+            methods: {
+                canDownload(video) {
+                    return video.dn_status === 0 || video.dn_status === 3
+                },
+                canStopDownload(video) {
+                    return video.dn_status === 1
+                },
+                statusText(status) {
+                    switch (status) {
+                        case 0:
+                            return "None"
+                        case 1:
+                            return "In progress"
+                        case 2:
+                            return "Ready"
+                        case 3:
+                            return "Fail"
+                        default:
+                            break;
+                    }
+                },
+                onAddVideoClick() {
+                    this.videoSubmit()
+                },
+                async videoSubmit() {
+
+                    const data = {
+                        "video_url": this.videoUrl
+                    }
+
+                    const resp = await fetch("/videos/", {
+                        method: "POST",
+                        headers: {
+                            'Content-Type': 'application/json;charset=utf-8'
+                        },
+                        body: JSON.stringify(data)
+                    });
+
+                    let fetched = null;
+
+                    if (resp.status == 400) {
+                        fetched = await resp.json()
+                        console.log(fetched)
+                    }
+
+                    this.getVideos();
+                },
+                async getVideos() {
+                    const resp = await fetch("/videos/", {
+                        method: "GET",
+                        headers: {
+                            'Content-Type': 'application/json;charset=utf-8'
+                        },
+                    });
+
+                    this.videos = await resp.json();
+
+                },
+                async getVideoInfo(video_id) {
+                    const resp = await fetch(`/videos/${video_id}/`, {
+                        headers: {
+                            'Content-Type': 'application/json;charset=utf-8'
+                        },
+                    });
+
+                    if (!resp.ok) {
+                        return null
+                    }
+
+                    return await resp.json();
+                },
+                async startDownload(videoId) {
+
+                    const video_status = await this.getVideoInfo(videoId);
+
+                    if (video_status && this.canDownload(video_status)) {
+
+                        const resp = await fetch(`/videos/${videoId}/start-dn`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json;charset=utf-8',
+                                'X-Csrftoken': Cookies.get("csrftoken")
+                            },
+                        });
+
+                        console.log(resp.status);
+                        const data = await resp.json();
+
+                        console.log(data);
+
+                        this.getVideos()
+                        .then(()=>this.startPollVideoStatus());
+                        
+                    }
+
+                },
+                async stopDownload(videoId) {
+                    
+                    const video_status = await this.getVideoInfo(videoId);
+
+                    if (video_status && this.canStopDownload(video_status)) {
+
+                        const resp = await fetch(`/videos/${videoId}/stop-dn`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json;charset=utf-8',
+                                'X-Csrftoken': Cookies.get("csrftoken")
+                            },
+                        });
+
+                        console.log(resp.status);
+                        const data = await resp.json();
+
+                        console.log(data);
+
+                        await this.getVideos();
+
+                        this.startPollVideoStatus()
+                    }
+                },
+                async statusPollFunction() {
+                        if (!this.pollVideos.length) {
+                            return
+                        }
+
+                        const resp = await fetch("/dn_status", {
+                            method: "POST",
+                            headers: {
+                                'Content-Type': 'application/json;charset=utf-8',
+                                'X-Csrftoken': Cookies.get("csrftoken")
+                            },
+                            body: JSON.stringify({
+                                video_ids: this.pollVideos.map(v => v.video_id)
+                            })
+                        })
+
+                        const data = await resp.json()
+
+                        // update video status
+                        data.forEach(newVal => {
+                            const idx = this.videos.findIndex(
+                                v => v.video_id === newVal.video_id
+                            )
+                            let oldVal = this.videos[idx];
+
+                            oldVal.dn_status = newVal.dn_status;
+                            oldVal.result = newVal.result;
+
+                            if (idx => 0) {
+                                Vue.set(this.videos, idx, oldVal);
+                            }
+                        });
+                    },
+                    startPollVideoStatus() {
+                        if (this.pollItervalId) {
+                            return;
+                        }
+
+                        this.pollItervalId = setInterval(
+                            this.statusPollFunction, 1000
+                        )
+                    }
+                }
+            });
+
+    </script>
+</body>
+
+</html>

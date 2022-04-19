@@ -1,0 +1,7 @@
+celery==4.4.7
+django==3.2
+djangorestframework==3.13.1
+flower==0.9.7
+redis==3.5.3
+youtube_dl==2021.12.17
+typing-extensions==4.2.0

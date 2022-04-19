@@ -1,0 +1,33 @@
+version: '3.7'
+
+services: 
+    web:
+        build: ./ytdl
+        command: ["sh", "-c", "python /tmp/debugpy --listen 0.0.0.0:5678 manage.py runserver 0.0.0.0:8000 --nothreading"]
+        volumes: 
+            - ./ytdl:/app/ytdl
+            - ./downloads:/app/downloads
+        ports:
+            - 5678:5678 
+            - 8000:8000
+    celery:
+        build: ./ytdl
+        command: celery worker --app=config --loglevel=info
+        volumes: 
+            - ./ytdl:/app/ytdl
+            - ./downloads:/app/downloads
+        depends_on: 
+            - web
+            - redis
+    
+    flower:
+        build: ./ytdl
+        command: flower -A config --port=5555 --broker=redis://redis:6379
+        ports:
+            - 5555:5555
+        depends_on: 
+            - web
+            - celery
+            - redis
+    redis:
+        image: redis:alpine
